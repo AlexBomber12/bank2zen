@@ -1,15 +1,25 @@
-name: build-exe
+name: build
+
 on:
   push:
+    branches: [main]
     tags: ['v*']
+
 jobs:
   build:
     runs-on: windows-latest
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-python@v5
-      with: {python-version: '3.11'}
-    - run: pip install -r requirements.txt
-    - run: pyinstaller gui.py --onefile --noconsole
-    - uses: softprops/action-gh-release@v1
-      with: {files: dist/gui.exe}
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - run: pyinstaller bank2zen.spec
+      - uses: actions/upload-artifact@v3
+        with:
+          name: bank2zen
+          path: dist/bank2zen.exe
+      - if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/bank2zen.exe

@@ -1,4 +1,4 @@
 pandas
 openpyxl
-PySimpleGUI
+tk ; sys_platform == "win32"
 pyinstaller
