@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import pandas as pd, json, pathlib
 from bank2zen import convert, normalize, CATS_FILE, ACC_FILE
+from dedup_json import dedup_json
 
 # ── справочники ───────────────────────────────────────────────────────────────
 CATS = sorted([
@@ -131,6 +132,7 @@ class AssignWin(tk.Toplevel):
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
+        dedup_json()
         self.title('bank2zen — Fineco → ZenMoney'); self.geometry('770x360')
         frm=ttk.Frame(self,padding=10); frm.grid(sticky='nsew')
         self.columnconfigure(0,weight=1); frm.columnconfigure(1,weight=1)
