@@ -146,8 +146,10 @@ class AssignWin(tk.Toplevel):
         )
         self.lb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); sb.config(command=self.lb.yview)
         for _, r in self.df.iterrows():
-            amt = r["Income"] if pd.notna(r["Income"]) else -r["Expense"]
-            self.lb.insert(tk.END, f"{r['Data']} | {amt:+.2f} | {r['Descrizione_Completa']}")
+            self.lb.insert(
+                tk.END,
+                f"{r['Data']} | {r['Amount']:+.2f} | {r['Descrizione_Completa']}"
+            )
         # controls
         bar = tk.Frame(self); bar.pack(pady=6)
         self.cmb = AutoCombo(bar, values=CATS, width=70); self.cmb.grid(row=0, column=0, padx=5)
