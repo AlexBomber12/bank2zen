@@ -3,30 +3,34 @@ name: build
 on:
   push:
     branches: [main]
-    tags: ['v*']
+    tags: ['v*']            # tag push will also trigger
+  pull_request:             # build PRs too
+  workflow_dispatch: {}     # manual trigger button
 
 jobs:
   build:
     runs-on: windows-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: '3.11' }
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with: { python-version: '3.11' }
 
-      - name: Install deps
-        run: pip install -r requirements.txt
+    - name: Install deps
+      run: pip install -r requirements.txt
 
-      - name: Build one-file EXE
-        run: pyinstaller bank2zen.spec --onefile --noconsole
+    - name: Build one-file EXE
+      run: pyinstaller bank2zen.spec --onefile --noconsole
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: bank2zen.exe
-          path: dist/bank2zen.exe
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: bank2zen.exe
+        path: dist/bank2zen.exe
 
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/bank2zen.exe
+    - name: Create GitHub Release (only on tag)
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v2
+      with:
+        files: dist/bank2zen.exe
+        generate_release_notes: true
