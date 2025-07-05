@@ -79,12 +79,11 @@ def convert(xlsx):
     df[["Account", "AccountTo", "Income", "Expense"]] = df.apply(split, axis=1)
 
     # ── незнакомые категории → new_desc.xlsx ────────────
-    unknown = df[df["Category"] == ""][["Data","Income","Expense","Descrizione_Completa"]]
+    unknown = df[df["Category"] == ""][["Data", "Entrate", "Uscite", "Descrizione_Completa"]]
     if len(unknown):
-        unknown["Amount"] = unknown.apply(
-            lambda r: r["Income"] if pd.notna(r["Income"]) else -r["Expense"], axis=1)
-        unknown[["Data","Amount","Descrizione_Completa"]].to_excel("new_desc.xlsx",
-                                                                   index=False)
+        unknown[["Data", "Entrate", "Uscite", "Descrizione_Completa"]].to_excel(
+            "new_desc.xlsx", index=False
+        )
         return "need_class"
 
     # ── итоговый CSV ────────────────────────────────────

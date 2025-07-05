@@ -146,17 +146,9 @@ class AssignWin(tk.Toplevel):
         )
         self.lb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); sb.config(command=self.lb.yview)
         for _, r in self.df.iterrows():
-            # robust amount calculation
-            amt = r.get('Amount')
-            if pd.isna(amt):
-                inc = r.get('Income')
-                exp = r.get('Expense')
-                if pd.notna(inc):
-                    amt = inc
-                elif pd.notna(exp):
-                    amt = -exp
-                else:
-                    amt = 0
+            inc = r.get('Entrate', 0) or 0
+            exp = r.get('Uscite', 0) or 0
+            amt = inc if pd.notna(inc) and inc != 0 else -exp
             self.lb.insert(
                 tk.END,
                 f"{r['Data']} | {amt:+.2f} | {r['Descrizione_Completa']}"
