@@ -1,4 +1,4 @@
-import json, pathlib, shutil, sys
+import json, pathlib, shutil
 
 
 def load_safe(path: pathlib.Path):
@@ -28,3 +28,4 @@ def dedup_file(path: str):
             indent=2,
         )
         print(f"{p.name}: duplicates removed")
+
