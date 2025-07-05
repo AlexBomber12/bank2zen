@@ -163,10 +163,12 @@ class AssignWin(tk.Toplevel):
         cat = self.cmb.get(); sel = list(self.lb.curselection())
         if not sel or not cat:
             return
-        for idx in reversed(sel):
-            patt = normalize(self.df.loc[idx, 'Descrizione_Completa'])
+        for pos in reversed(sel):                       # pos = listbox index
+            patt = normalize(self.df.iloc[pos]['Descrizione_Completa'])
             self.pairs.append((cat, patt))
-            self.lb.delete(idx); self.df.drop(index=idx, inplace=True)
+            self.lb.delete(pos)
+            self.df.drop(index=self.df.index[pos], inplace=True)
+        self.df.reset_index(drop=True, inplace=True)    # keep indices aligned
         if not self.lb.size():
             self.finish()
 
