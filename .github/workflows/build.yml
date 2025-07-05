@@ -4,22 +4,45 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write           # required for gh-release
 
 jobs:
   build:
     runs-on: windows-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - run: pip install -r requirements.txt
-      - run: pyinstaller bank2zen.spec
-      - uses: actions/upload-artifact@v4
-        with:
-          name: bank2zen
-          path: dist/bank2zen.exe
-      - if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
-        with:
-          files: dist/bank2zen.exe
+    - uses: actions/checkout@v4
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: pip install -r requirements.txt
+
+    - name: Build one-file exe
+      shell: pwsh             # default on windows-latest, but explicit for clarity
+      run: |
+        pyinstaller gui_tk.py --onefile --noconsole `
+          --hidden-import openpyxl `
+          --add-data "categories.json;." `
+          --add-data "accounts_to.json;." `
+          --name bank2zen
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: bank2zen.exe
+        path: dist/bank2zen.exe     # PyInstaller drops file directly here
+
+    - name: Create GitHub release on tag
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v2
+      with:
+        files: dist/bank2zen.exe
+        generate_release_notes: true
+

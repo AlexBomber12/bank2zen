@@ -2,7 +2,10 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import pandas as pd, json, pathlib
 from bank2zen import convert, normalize, CATS_FILE, ACC_FILE
-from dedup_json import dedup_json
+from dedup_json import dedup_file
+
+for f in ("categories.json", "accounts_to.json"):
+    dedup_file(f)
 
 # ── справочники ───────────────────────────────────────────────────────────────
 CATS = sorted([
@@ -126,13 +129,53 @@ class Review(tk.Toplevel):
 
 # AssignWin без изменений (опущено для краткости) ─────────────────────────────
 class AssignWin(tk.Toplevel):
-    pass
+    """Assign categories to unknown rows."""
+
+    def __init__(self, master, df):
+        super().__init__(master)
+        self.title('Assign categories'); self.geometry('980x540')
+        self.df = df.reset_index(drop=True); self.pairs = []
+        # listbox
+        fr = tk.Frame(self); fr.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        sb = tk.Scrollbar(fr); sb.pack(side=tk.RIGHT, fill=tk.Y)
+        self.lb = tk.Listbox(
+            fr,
+            selectmode=tk.EXTENDED,
+            width=140,
+            yscrollcommand=sb.set,
+        )
+        self.lb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); sb.config(command=self.lb.yview)
+        for _, r in self.df.iterrows():
+            amt = r["Income"] if pd.notna(r["Income"]) else -r["Expense"]
+            self.lb.insert(tk.END, f"{r['Data']} | {amt:+.2f} | {r['Descrizione_Completa']}")
+        # controls
+        bar = tk.Frame(self); bar.pack(pady=6)
+        self.cmb = AutoCombo(bar, values=CATS, width=70); self.cmb.grid(row=0, column=0, padx=5)
+        ttk.Button(bar, text='Assign', command=self.assign).grid(row=0, column=1, padx=5)
+        ttk.Button(bar, text='Finish', command=self.finish).grid(row=0, column=2, padx=5)
+
+    def assign(self):
+        cat = self.cmb.get(); sel = list(self.lb.curselection())
+        if not sel or not cat:
+            return
+        for idx in reversed(sel):
+            patt = normalize(self.df.loc[idx, 'Descrizione_Completa'])
+            self.pairs.append((cat, patt))
+            self.lb.delete(idx); self.df.drop(index=idx, inplace=True)
+        if not self.lb.size():
+            self.finish()
+
+    def finish(self):
+        data = jload(CATS_FILE)
+        for cat, patt in self.pairs:
+            add_pat(data, cat, patt)
+        jsave(CATS_FILE, data)
+        self.destroy()
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        dedup_json()
         self.title('bank2zen — Fineco → ZenMoney'); self.geometry('770x360')
         frm=ttk.Frame(self,padding=10); frm.grid(sticky='nsew')
         self.columnconfigure(0,weight=1); frm.columnconfigure(1,weight=1)
