@@ -32,6 +32,7 @@ exe = EXE(
     strip=False,
     upx=True,
     console=False,
+    onefile=True,
 )
 
 coll = COLLECT(
