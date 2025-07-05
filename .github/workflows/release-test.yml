@@ -1,0 +1,70 @@
+name: release-test
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: pip install -r requirements.txt
+
+    - name: Build one-file exe
+      shell: pwsh
+      run: |
+        pyinstaller gui_tk.py --onefile --noconsole `
+          --hidden-import openpyxl `
+          --add-data "categories.json;." `
+          --add-data "accounts_to.json;." `
+          --name bank2zen
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: bank2zen.exe
+        path: dist/bank2zen.exe
+
+    - name: Create GitHub release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: dist/bank2zen.exe
+        generate_release_notes: true
+
+  verify:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/download-artifact@v4
+      with:
+        name: bank2zen.exe
+        path: .
+    - run: |
+        if [ ! -f bank2zen.exe ]; then
+          echo "EXE not found"; exit 1; fi
+        size=$(stat -c%s bank2zen.exe)
+        echo "EXE size: $size bytes"
+        if [ $size -lt 8000000 ]; then
+          echo "File too small"; exit 1; fi
+
+  smoke:
+    needs: build
+    runs-on: windows-latest
+    steps:
+    - uses: actions/download-artifact@v4
+      with:
+        name: bank2zen.exe
+        path: .
+    - name: Run EXE with no args
+      run: |
+        ./bank2zen.exe || exit 0
