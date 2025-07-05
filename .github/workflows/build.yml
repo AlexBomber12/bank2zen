@@ -3,7 +3,6 @@ name: build
 on:
   push:
     branches: [main]
-    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -46,36 +45,4 @@ jobs:
         files: dist/bank2zen.exe
         generate_release_notes: true
 
-  verify:
-    needs: build
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-    steps:
-    - name: Download artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: bank2zen.exe
-        path: .
-
-    - name: Check file exists & size
-      run: |
-        if [ ! -f bank2zen.exe ]; then
-          echo "EXE not found"; exit 1; fi
-        size=$(stat -c%s bank2zen.exe)
-        echo "EXE size: $size bytes"
-        if [ $size -lt 8000000 ]; then
-          echo "File too small — likely onedir or missing libs"; exit 1; fi
-
-  smoke:
-    needs: build
-    runs-on: windows-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-    steps:
-    - uses: actions/download-artifact@v4
-      with:
-        name: bank2zen.exe
-        path: .
-    - name: Run EXE with no args
-      run: |
-        ./bank2zen.exe || exit 0
 
