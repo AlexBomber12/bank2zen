@@ -146,12 +146,31 @@ class AssignWin(tk.Toplevel):
         )
         self.lb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); sb.config(command=self.lb.yview)
         for _, r in self.df.iterrows():
-            inc = r.get('Entrate', 0) or 0
-            exp = r.get('Uscite', 0) or 0
-            amt = inc if pd.notna(inc) and inc != 0 else -exp
+            inc_raw = r.get('Entrate', None)
+            exp_raw = r.get('Uscite', None)
+            if inc_raw is None:
+                inc_raw = r.get('Income', 0)
+            if exp_raw is None:
+                exp_raw = r.get('Expense', 0)
+
+            inc = pd.to_numeric(inc_raw, errors='coerce')
+            exp = pd.to_numeric(exp_raw, errors='coerce')
+            inc = 0.0 if pd.isna(inc) else float(abs(inc))
+            exp = 0.0 if pd.isna(exp) else float(abs(exp))
+
+            if inc == 0 and exp == 0:
+                amt = 0.0
+            elif inc > 0 and exp > 0:
+                amt = inc - exp
+            elif inc > 0:
+                amt = inc
+            else:
+                amt = -exp
+
+            amount_str = f"{amt:+.2f}"
             self.lb.insert(
                 tk.END,
-                f"{r['Data']} | {amt:+.2f} | {r['Descrizione_Completa']}"
+                f"{r['Data']} | {amount_str} | {r['Descrizione_Completa']}"
             )
         # controls
         bar = tk.Frame(self); bar.pack(pady=6)
