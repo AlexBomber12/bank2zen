@@ -209,7 +209,7 @@ class App(tk.Tk):
         self.path=tk.StringVar()
         ttk.Entry(frm,textvariable=self.path).grid(row=0,column=1,sticky='ew')
         ttk.Button(frm,text='Browse',command=self.browse).grid(row=0,column=2,sticky='ew',padx=5)
-        ttk.Button(frm,text='Convert',command=self.convert).grid(row=1,column=1,sticky='ew',pady=8)
+        ttk.Button(frm,text='Assign and Convert',command=self.assign_and_convert).grid(row=1,column=1,sticky='ew',pady=8)
         ttk.Button(frm,text='Exit',command=self.destroy).grid(row=1,column=2,sticky='ew',padx=5)
         self.log_box=tk.Text(frm,height=10,state='disabled')
         self.log_box.grid(row=2,column=0,columnspan=3,sticky='nsew'); frm.rowconfigure(2,weight=1)
@@ -220,22 +220,42 @@ class App(tk.Tk):
 
     def browse(self):
         f=filedialog.askopenfilename(filetypes=[('Excel','*.xlsx')]); self.path.set(f or '')
-    def convert(self):
-        fn=self.path.get()
-        if not fn: messagebox.showwarning('Нет файла','Выберите .xlsx'); return
-        try: rc=convert(fn)
-        except PermissionError: messagebox.showerror('Ошибка','Файл выгрузки открыт.'); return
-        if rc=='ok':
+    def assign_and_convert(self):
+        fn=self.path.get().strip()
+        if not fn:
+            messagebox.showwarning('Нет файла','Выберите .xlsx')
+            return
+        try:
+            res=convert(fn)
+        except PermissionError:
+            messagebox.showerror('Ошибка','Файл выгрузки открыт.')
+            return
+        if res=='ok':
+            self.log('CSV создан → Review')
+            Review(self,pd.read_csv('out_zenmoney.csv',sep=';'))
+            return
+        if not pathlib.Path('new_desc.xlsx').exists():
+            self.log('new_desc.xlsx не найден')
+            return
+        df=pd.read_excel('new_desc.xlsx')
+        n=len(df)
+        self.log(f'Обнаружены неизвестные категории. Нужно разметить {n} строк.')
+        assign_win=AssignWin(self,df)
+        self.wait_window(assign_win)
+        try:
+            res2=convert(fn)
+        except PermissionError:
+            messagebox.showerror('Ошибка','Файл выгрузки открыт.')
+            return
+        if res2=='ok':
             self.log('CSV создан → Review')
             Review(self,pd.read_csv('out_zenmoney.csv',sep=';'))
         else:
-            if not pathlib.Path('new_desc.xlsx').exists():
-                self.log('new_desc.xlsx не найден'); return
-            df=pd.read_excel('new_desc.xlsx'); self.log(f'Нужно разметить {len(df)} строк')
-            AssignWin(self,df); self.wait_window()
-            if convert(fn)=='ok':
-                self.log('CSV создан → Review')
-                Review(self,pd.read_csv('out_zenmoney.csv',sep=';'))
+            if pathlib.Path('new_desc.xlsx').exists():
+                left=len(pd.read_excel('new_desc.xlsx'))
+                self.log(f'Осталось разметить {left} строк.')
+            else:
+                self.log('new_desc.xlsx не найден')
 
 if __name__ == '__main__':
     import pandas as pd
