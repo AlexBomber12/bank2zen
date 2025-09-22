@@ -106,7 +106,9 @@ class Review(tk.Toplevel):
     def _amount(self,r):
         inc=self._amount_val(r.get('Income'))
         out=self._amount_val(r.get('Expense'))
-        return inc if inc is not None else (-out if out is not None else 0)
+        inc = inc if inc is not None else 0
+        out = out if out is not None else 0
+        return inc - out
     def _refresh(self,sub=None):
         self.tree.delete(*self.tree.get_children())
         data=sub if sub is not None else self.df

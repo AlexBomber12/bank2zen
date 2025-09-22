@@ -139,6 +139,26 @@ def convert(xlsx):
 
     df["Norm"] = df["Descrizione_Completa"].apply(lambda s: normalize(str(s)))
 
+    inc = pd.to_numeric(df.get("Entrate", 0), errors="coerce").fillna(0).abs()
+    out = pd.to_numeric(df.get("Uscite", 0), errors="coerce").fillna(0).abs()
+
+    df["Income"] = ""
+    df["Expense"] = ""
+
+    df["Income"] = df["Income"].astype("object")
+    df["Expense"] = df["Expense"].astype("object")
+
+    mask_inc = (inc > 0) & (out == 0)
+    mask_exp = (out > 0) & (inc == 0)
+
+    df.loc[mask_inc, "Income"] = inc[mask_inc]
+    df.loc[mask_exp, "Expense"] = out[mask_exp]
+
+    amb = (inc > 0) & (out > 0)
+    if amb.any():
+        print(f"[bank2zen] WARNING: {amb.sum()} ambiguous rows (both Entrate & Uscite). Using Expense.")
+    df.loc[amb, "Expense"] = out[amb]
+
     cat_map = _load(CATS_FILE)
     acc_map = _load(ACC_FILE)
 
@@ -149,19 +169,38 @@ def convert(xlsx):
     def split(row):
         desc_short = str(row.get("Descrizione", ""))  # ← короткое описание
         full       = str(row["Descrizione_Completa"]).lower()
-        inc  = row["Entrate"] if pd.notna(row["Entrate"]) else ""
-        out  = abs(row["Uscite"]) if pd.notna(row["Uscite"]) else ""
+        inc = row.get("Income", "")
+        out = row.get("Expense", "")
         acc_from, acc_to = ACC_DEBIT, row["AccountTo"]
 
         if rx_credit.search(desc_short):              # кредитка
             acc_from = ACC_CREDIT
         elif rx_cashout.search(full):                 # снятие кеша
             acc_to   = ACC_CASH
-            inc      = out                            # приход на Cash
+            out_val = None
+            if isinstance(out, str):
+                s = out.strip()
+                if s:
+                    try:
+                        out_val = float(s.replace(",", "."))
+                    except ValueError:
+                        out_val = None
+            else:
+                try:
+                    out_val = float(out)
+                except (TypeError, ValueError):
+                    out_val = None
+
+            if out_val is not None and out_val != 0:
+                inc = abs(out_val)
+                out = ""
 
         return pd.Series([acc_from, acc_to, inc, out])
 
     df[["Account", "AccountTo", "Income", "Expense"]] = df.apply(split, axis=1)
+
+    df["Income"] = df["Income"].astype("object")
+    df["Expense"] = df["Expense"].astype("object")
 
     # ── незнакомые категории → new_desc.xlsx ────────────
     unknown = df[df["Category"] == ""][["Data", "Entrate", "Uscite", "Descrizione_Completa"]]
@@ -174,8 +213,9 @@ def convert(xlsx):
     # ── итоговый CSV ────────────────────────────────────
     cols = ["Data","Category","Descrizione_Completa",
             "Account","AccountTo","Income","Expense"]
-    df.to_csv("out_zenmoney.csv", columns=cols,
-              index=False, encoding="utf-8-sig", sep=";")
+    df_final = df.copy()
+    df_final.to_csv("out_zenmoney.csv", columns=cols,
+                    index=False, encoding="utf-8-sig", sep=";")
     return "ok"
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
