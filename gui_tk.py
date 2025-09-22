@@ -141,6 +141,7 @@ class AssignWin(tk.Toplevel):
         self.lb = tk.Listbox(
             fr,
             selectmode=tk.EXTENDED,
+            exportselection=False,
             width=140,
             yscrollcommand=sb.set,
         )
@@ -172,24 +173,65 @@ class AssignWin(tk.Toplevel):
                 tk.END,
                 f"{r['Data']} | {amount_str} | {r['Descrizione_Completa']}"
             )
+        self.lb.bind("<<ListboxSelect>>", self._on_list_select)
+        self.lb.bind("<Double-Button-1>", self._assign_selected)
+        self.lb.bind("<Return>", self._assign_selected)
+        self.lb.bind("<Control-a>", self._select_all)
         # controls
-        bar = tk.Frame(self); bar.pack(pady=6)
-        self.cmb = AutoCombo(bar, values=CATS, width=70); self.cmb.grid(row=0, column=0, padx=5)
-        ttk.Button(bar, text='Assign', command=self.assign).grid(row=0, column=1, padx=5)
-        ttk.Button(bar, text='Finish', command=self.finish).grid(row=0, column=2, padx=5)
+        bottom = tk.Frame(self); bottom.pack(fill=tk.X, padx=10, pady=(0,10))
+        self.sel_count = tk.StringVar(value="Selected: 0")
+        tk.Label(bottom, textvariable=self.sel_count).pack(side=tk.LEFT, padx=8)
+        controls = tk.Frame(bottom); controls.pack(side=tk.RIGHT)
+        self.cat_box = AutoCombo(controls, values=CATS, width=70); self.cat_box.grid(row=0, column=0, padx=5)
+        self.cat_box.state(["readonly"])
+        self.cat_box.bind("<Return>", self._assign_selected)
+        self.cat_box.bind("<<ComboboxSelected>>", self._on_category_change)
+        last_cat = getattr(self.master, "_last_assign_category", None)
+        if last_cat and last_cat in self.cat_box['values']:
+            self.cat_box.set(last_cat)
+            self.master._last_assign_category = last_cat
+        ttk.Button(controls, text='Assign', command=self._assign_selected).grid(row=0, column=1, padx=5)
+        ttk.Button(controls, text='Finish', command=self.finish).grid(row=0, column=2, padx=5)
 
-    def assign(self):
-        cat = self.cmb.get(); sel = list(self.lb.curselection())
-        if not sel or not cat:
-            return
-        for pos in reversed(sel):                       # pos = listbox index
+    def _on_list_select(self, *_):
+        self.sel_count.set(f"Selected: {len(self.lb.curselection())}")
+
+    def _select_all(self, event=None):
+        self.lb.selection_set(0, tk.END); self._on_list_select()
+        return "break"
+
+    def _on_category_change(self, *_):
+        cat = self._current_category()
+        if cat:
+            self.master._last_assign_category = cat
+
+    def _current_category(self):
+        cat = self.cat_box.get().strip()
+        return cat or None
+
+    def _assign_selected(self, event=None):
+        cat = self._current_category()
+        if not cat:
+            messagebox.showwarning("bank2zen", "Сначала выберите категорию.")
+            return "break" if event else None
+        sel = list(self.lb.curselection())
+        if not sel:
+            messagebox.showwarning("bank2zen", "Выберите одну или несколько строк.")
+            return "break" if event else None
+        self.master._last_assign_category = cat
+        for pos in sorted(sel, reverse=True):
             patt = normalize(self.df.iloc[pos]['Descrizione_Completa'])
             self.pairs.append((cat, patt))
             self.lb.delete(pos)
             self.df.drop(index=self.df.index[pos], inplace=True)
-        self.df.reset_index(drop=True, inplace=True)    # keep indices aligned
+        self.df.reset_index(drop=True, inplace=True)
+        self.lb.selection_clear(0, tk.END)
+        self._on_list_select()
         if not self.lb.size():
             self.finish()
+        else:
+            self.lb.focus_set()
+        return "break" if event else None
 
     def finish(self):
         data = jload(CATS_FILE)
