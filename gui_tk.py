@@ -49,8 +49,16 @@ class AutoCombo(ttk.Combobox):
 class Review(tk.Toplevel):
     COLS=('Date','Amount','Description','Category','AccountTo')
     WIDTHS=(90,90,620,180,120)
-    def __init__(self,master,df):
-        super().__init__(master); self.df=df; self.sort_state={}
+    def __init__(self,master,df=None):
+        super().__init__(master)
+        if df is None:
+            df=pd.read_csv('out_zenmoney.csv',sep=';')
+        else:
+            df=df.copy()
+        df=df.where(pd.notna(df),"")
+        df=df.replace({"nan":""})
+        self.df=df
+        self.sort_state={}
         self.title('Review'); self.geometry('1180x560')
         self._ui(); self._refresh()
     # UI
@@ -73,16 +81,41 @@ class Review(tk.Toplevel):
         self.tree.configure(yscroll=vs.set)
         self.tree.pack(side=tk.LEFT,fill=tk.BOTH,expand=True,padx=(10,0),pady=5); vs.pack(side=tk.RIGHT,fill=tk.Y,pady=5)
     # helpers
+    def _fmt_cell(self,v):
+        if v is None:
+            return ""
+        if isinstance(v,float) and pd.isna(v):
+            return ""
+        if isinstance(v,str) and v.lower()=="nan":
+            return ""
+        return str(v)
+    def _amount_val(self,v):
+        if v is None:
+            return None
+        if isinstance(v,str):
+            s=v.strip()
+            if not s or s.lower()=="nan":
+                return None
+            try:
+                return float(s.replace(',','.'))
+            except ValueError:
+                return None
+        if isinstance(v,(int,float)):
+            return None if pd.isna(v) else float(v)
+        return None
     def _amount(self,r):
-        inc=r['Income'] if pd.notna(r['Income']) else None
-        out=r['Expense'] if pd.notna(r['Expense']) else None
+        inc=self._amount_val(r.get('Income'))
+        out=self._amount_val(r.get('Expense'))
         return inc if inc is not None else (-out if out is not None else 0)
     def _refresh(self,sub=None):
         self.tree.delete(*self.tree.get_children())
         data=sub if sub is not None else self.df
         for idx,r in data.iterrows():
             self.tree.insert('',tk.END,iid=str(idx),
-                values=(r['Data'],f"{self._amount(r):+.2f}",r['Descrizione_Completa'],r['Category'],r['AccountTo']))
+                values=(self._fmt_cell(r['Data']),f"{self._amount(r):+.2f}",
+                    self._fmt_cell(r['Descrizione_Completa']),
+                    self._fmt_cell(r['Category']),
+                    self._fmt_cell(r['AccountTo'])))
     def _filter(self,*_):
         q=self.q.get().lower()
         if not q: self._refresh(); return
@@ -117,7 +150,10 @@ class Review(tk.Toplevel):
     def _save_exit(self):
         try:
             cols=['Data','Category','Descrizione_Completa','Account','AccountTo','Income','Expense']
-            self.df.to_csv('out_zenmoney.csv',columns=cols,index=False,encoding='utf-8-sig',sep=';')
+            df_to_save=self.df.copy()
+            df_to_save=df_to_save.where(pd.notna(df_to_save),"")
+            df_to_save=df_to_save.replace({"nan":""})
+            df_to_save.to_csv('out_zenmoney.csv',columns=cols,index=False,encoding='utf-8-sig',sep=';')
             cm,am=jload(CATS_FILE),jload(ACC_FILE)
             for _,r in self.df.iterrows():
                 p=normalize(r['Descrizione_Completa'])
