@@ -43,6 +43,12 @@ class AutoCombo(ttk.Combobox):
         super().__init__(*a,**kw); self._base=list(self['values'])
         self.bind('<KeyRelease>',self._filter)
     def _filter(self,_):
+        try:
+            if self.cget('state')=='readonly':
+                self['values']=self._base
+                return
+        except Exception:
+            pass
         q=self.get().lower(); self['values']=[v for v in self._base if q in v.lower()] if q else self._base
 
 # ── Review окно ───────────────────────────────────────────────────────────────
@@ -242,6 +248,10 @@ class AssignWin(tk.Toplevel):
         cat = self._current_category()
         if cat:
             self.master._last_assign_category = cat
+            try:
+                self.cat_box['values'] = self.cat_box._base
+            except Exception:
+                pass
 
     def _current_category(self):
         cat = self.cat_box.get().strip()
@@ -269,6 +279,12 @@ class AssignWin(tk.Toplevel):
             self.finish()
         else:
             self.lb.focus_set()
+        try:
+            self.cat_box['values'] = self.cat_box._base
+        except Exception:
+            pass
+        if getattr(self.master, "_last_assign_category", None):
+            self.cat_box.set(self.master._last_assign_category)
         return "break" if event else None
 
     def finish(self):
