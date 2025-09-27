@@ -1,7 +1,12 @@
+import os
+import sys
+import subprocess
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import pandas as pd, json, pathlib
-from bank2zen import convert, normalize, CATS_FILE, ACC_FILE
+from pathlib import Path
+from bank2zen import convert, normalize, CATS_FILE, ACC_FILE, _read_movements_xlsx
+from history_index import db_path, ensure_db, seen_lookup, mark_seen
 from dedup_json import dedup_file
 
 for f in ("categories.json", "accounts_to.json"):
@@ -309,6 +314,7 @@ class App(tk.Tk):
         ttk.Button(frm,text='Exit',command=self.destroy).grid(row=1,column=2,sticky='ew',padx=5)
         self.log_box=tk.Text(frm,height=10,state='disabled')
         self.log_box.grid(row=2,column=0,columnspan=3,sticky='nsew'); frm.rowconfigure(2,weight=1)
+        self._make_menubar()
 
     def log(self,msg):
         self.log_box['state']='normal'; self.log_box.insert(tk.END,msg+'\n')
@@ -325,6 +331,9 @@ class App(tk.Tk):
             res=convert(fn)
         except PermissionError:
             messagebox.showerror('Ошибка','Файл выгрузки открыт.')
+            return
+        if res=='no_new':
+            self.log('Новых операций нет.')
             return
         if res=='ok':
             self.log('CSV создан → Review')
@@ -343,6 +352,9 @@ class App(tk.Tk):
         except PermissionError:
             messagebox.showerror('Ошибка','Файл выгрузки открыт.')
             return
+        if res2=='no_new':
+            self.log('Новых операций нет.')
+            return
         if res2=='ok':
             self.log('CSV создан → Review')
             Review(self,pd.read_csv('out_zenmoney.csv',sep=';'))
@@ -352,6 +364,156 @@ class App(tk.Tk):
                 self.log(f'Осталось разметить {left} строк.')
             else:
                 self.log('new_desc.xlsx не найден')
+
+    def _make_menubar(self):
+        try:
+            m = tk.Menu(self)
+            tools = tk.Menu(m, tearoff=0)
+            tools.add_command(label="Open history folder", command=self._open_history_dir)
+            tools.add_separator()
+            tools.add_command(label="Seed history from folder…", command=self._seed_history_from_folder)
+            tools.add_separator()
+            tools.add_command(label="Reset history…", command=self._reset_history)
+            m.add_cascade(label="Tools", menu=tools)
+            self.config(menu=m)
+        except Exception as e:
+            self.log(f"Menu init error: {e}")
+
+    def _history_dir(self) -> Path:
+        try:
+            return Path(db_path()).parent
+        except Exception:
+            return Path.home() / ".bank2zen"
+
+    def _open_history_dir(self):
+        p = self._history_dir()
+        p.mkdir(parents=True, exist_ok=True)
+        try:
+            if sys.platform.startswith('win'):
+                os.startfile(str(p))  # type: ignore[attr-defined]
+            elif sys.platform == 'darwin':
+                subprocess.Popen(['open', str(p)])
+            else:
+                subprocess.Popen(['xdg-open', str(p)])
+            self.log(f"Opened history folder: {p}")
+        except Exception as e:
+            self.log(f"Cannot open folder: {p} ({e})")
+            messagebox.showinfo('bank2zen', f"History folder:\n{p}")
+
+    def _reset_history(self):
+        if not messagebox.askyesno('bank2zen', 'Reset history index?\nThis will forget all previously imported transactions.'):
+            return
+        p = Path(db_path())
+        try:
+            if p.exists():
+                try:
+                    p.unlink()
+                    self.log('History reset: file deleted.')
+                    messagebox.showinfo('bank2zen', 'History reset.\nFile removed.')
+                    return
+                except Exception:
+                    pass
+            con = ensure_db()
+            try:
+                con.execute('DELETE FROM seen')
+                con.execute('VACUUM')
+                con.commit()
+            finally:
+                con.close()
+            self.log('History reset: table cleared.')
+            messagebox.showinfo('bank2zen', 'History reset.\nTable cleared.')
+        except Exception as e:
+            self.log(f'History reset error: {e}')
+            messagebox.showerror('bank2zen', f'Error resetting history:\n{e}')
+
+    def _seed_history_from_folder(self):
+        folder = filedialog.askdirectory(title='Select folder with XLSX exports')
+        if not folder:
+            return
+        only90 = messagebox.askyesno('bank2zen', 'Seed only last 90 days?\nYes = last 90 days, No = all history.')
+        from datetime import date, timedelta
+        since = date.today() - timedelta(days=90) if only90 else None
+
+        con = ensure_db()
+        folder = Path(folder)
+        files = sorted(folder.glob('*.xlsx'))
+        total = dupes = new = 0
+
+        for xf in files:
+            try:
+                df = _read_movements_xlsx(str(xf))
+                if df.empty:
+                    continue
+                df['Data_Valuta'] = pd.to_datetime(df['Data_Valuta'], dayfirst=True, errors='coerce')
+                df = df[df['Data_Valuta'].notna()].copy()
+                if since is not None:
+                    df = df[df['Data_Valuta'].dt.date >= since]
+                if df.empty:
+                    continue
+
+                entr = pd.to_numeric(df.get('Entrate', 0), errors='coerce').fillna(0).abs()
+                usct = pd.to_numeric(df.get('Uscite', 0), errors='coerce').fillna(0).abs()
+
+                direction = pd.Series('I', index=df.index)
+                direction.loc[usct > 0] = 'O'
+                amount = entr.copy()
+                amount.loc[usct > 0] = usct[usct > 0]
+                amount = amount.round(2)
+
+                if 'Descrizione_Completa' in df.columns:
+                    desc_full = df['Descrizione_Completa']
+                else:
+                    desc_full = df.get('Descrizione', '')
+                account = df.get('Account', '')
+
+                keys = []
+                from history_index import fingerprint  # local import avoids circulars
+                for i in df.index:
+                    date_iso = df.at[i, 'Data_Valuta'].date().isoformat()
+                    dirc = direction.at[i]
+                    cents = int((amount.at[i] * 100))
+                    if isinstance(desc_full, pd.Series):
+                        text = str(desc_full.at[i]) if pd.notna(desc_full.at[i]) else ''
+                    else:
+                        text = str(desc_full) if desc_full is not None else ''
+                    if isinstance(account, pd.Series):
+                        acc_val = str(account.at[i]) if i in account.index else ''
+                    else:
+                        acc_val = str(account) if account is not None else ''
+                    keys.append(fingerprint(date_iso, dirc, cents, text, acc_val))
+
+                found = seen_lookup(con, keys)
+                seen_local = set(found)
+                to_ins = []
+                for j, key in enumerate(keys):
+                    total += 1
+                    if key in seen_local:
+                        dupes += 1
+                        continue
+                    i = df.index[j]
+                    d = df.at[i, 'Data_Valuta'].date().isoformat()
+                    dirc = direction.at[i]
+                    amt = float(amount.at[i])
+                    if isinstance(desc_full, pd.Series):
+                        text = str(desc_full.at[i]) if pd.notna(desc_full.at[i]) else ''
+                    else:
+                        text = str(desc_full) if desc_full is not None else ''
+                    if isinstance(account, pd.Series):
+                        acc_val = str(account.at[i]) if i in account.index else ''
+                    else:
+                        acc_val = str(account) if account is not None else ''
+                    to_ins.append((key, d, dirc, amt, acc_val, '', '', xf.name))
+                    seen_local.add(key)
+                if to_ins:
+                    mark_seen(con, to_ins)
+                    new += len(to_ins)
+                self.log(f'Seeded from {xf.name}: +{len(to_ins)} new, {len(found)} seen total.')
+            except Exception as e:
+                self.log(f'Seed error {xf.name}: {e}')
+
+        messagebox.showinfo('bank2zen', f'Seed done.\nFiles: {len(files)}\nNew: {new}\nDuplicates: {dupes}\nScanned rows: {total}')
+        self.log(f'Seed done. Files={len(files)} New={new} Duplicates={dupes} TotalRows={total}')
+        con.close()
 
 if __name__ == '__main__':
     import pandas as pd
