@@ -2,6 +2,7 @@
 
 import pandas as pd, json, re, sys, os
 from pathlib import Path
+from history_index import ensure_db, fingerprint, seen_lookup, mark_seen
 
 # ── ваши счета ────────────────────────────────────────────────────────────────
 ACC_DEBIT   = "Fineco Debit"
@@ -137,10 +138,62 @@ def convert(xlsx):
     if "Uscite" not in df.columns:
         df["Uscite"] = 0.0
 
+    df["Data_Valuta"] = pd.to_datetime(df["Data_Valuta"], dayfirst=True, errors="coerce")
+    df = df[df["Data_Valuta"].notna()].copy()
+
+    entr = pd.to_numeric(df.get("Entrate", 0), errors="coerce").fillna(0).abs()
+    usct = pd.to_numeric(df.get("Uscite", 0), errors="coerce").fillna(0).abs()
+
+    direction = pd.Series("I", index=df.index)
+    direction.loc[usct > 0] = "O"
+    amount = entr.copy()
+    amount.loc[usct > 0] = usct[usct > 0]
+    amount = amount.round(2)
+    amount_cents = (amount * 100).round(0).astype("int64")
+
+    if "Descrizione_Completa" in df.columns:
+        desc_full_source = df["Descrizione_Completa"]
+    else:
+        desc_full_source = df.get("Descrizione", "")
+    account_source = df.get("Account", "")
+
+    keys = []
+    for i in df.index:
+        date_iso = df.at[i, "Data_Valuta"].date().isoformat()
+        dirc = direction.at[i]
+        cents = int(amount_cents.at[i])
+        if isinstance(desc_full_source, pd.Series):
+            text = str(desc_full_source.at[i]) if pd.notna(desc_full_source.at[i]) else ""
+        else:
+            text = str(desc_full_source) if desc_full_source is not None else ""
+        if isinstance(account_source, pd.Series):
+            acc_val = str(account_source.at[i]) if i in account_source.index else ""
+        else:
+            acc_val = str(account_source) if account_source is not None else ""
+        keys.append(fingerprint(date_iso, dirc, cents, text, acc_val))
+
+    con = ensure_db()
+    already = seen_lookup(con, keys)
+    df["__key__"] = keys
+    new_mask = ~df["__key__"].isin(already)
+    dupes = int((~new_mask).sum())
+    news = int(new_mask.sum())
+    print(f"[bank2zen] Dedup: skipped {dupes}, new {news}")
+
+    df = df.loc[new_mask].copy()
+    if df.empty:
+        con.close()
+        return "no_new"
+
+    entr = entr.loc[df.index]
+    usct = usct.loc[df.index]
+    direction = direction.loc[df.index]
+    amount = amount.loc[df.index]
+
     df["Norm"] = df["Descrizione_Completa"].apply(lambda s: normalize(str(s)))
 
-    inc = pd.to_numeric(df.get("Entrate", 0), errors="coerce").fillna(0).abs()
-    out = pd.to_numeric(df.get("Uscite", 0), errors="coerce").fillna(0).abs()
+    inc = entr
+    out = usct
 
     df["Income"] = ""
     df["Expense"] = ""
@@ -208,14 +261,41 @@ def convert(xlsx):
         unknown[["Data", "Entrate", "Uscite", "Descrizione_Completa"]].to_excel(
             "new_desc.xlsx", index=False
         )
+        con.close()
         return "need_class"
 
     # ── итоговый CSV ────────────────────────────────────
     cols = ["Data","Category","Descrizione_Completa",
             "Account","AccountTo","Income","Expense"]
-    df_final = df.copy()
+    df_final = df.drop(columns=["__key__"]).copy()
     df_final.to_csv("out_zenmoney.csv", columns=cols,
                     index=False, encoding="utf-8-sig", sep=";")
+
+    if "Descrizione_Completa" in df.columns:
+        desc_full_current = df["Descrizione_Completa"]
+    else:
+        desc_full_current = df.get("Descrizione", "")
+    account_current = df.get("Account", "")
+
+    rows_to_index = []
+    src_name = Path(xlsx).name
+    for i in df.index:
+        d = df.at[i, "Data_Valuta"].date().isoformat()
+        dirc = "O" if (usct.at[i] > 0) else "I"
+        amt = float(amount.at[i])
+        if isinstance(desc_full_current, pd.Series):
+            text = str(desc_full_current.at[i]) if pd.notna(desc_full_current.at[i]) else ""
+        else:
+            text = str(desc_full_current) if desc_full_current is not None else ""
+        if isinstance(account_current, pd.Series):
+            acc_val = str(account_current.at[i]) if i in account_current.index else ""
+        else:
+            acc_val = str(account_current) if account_current is not None else ""
+        key = df.at[i, "__key__"]
+        rows_to_index.append((key, d, dirc, amt, acc_val, "", "", src_name))
+    if rows_to_index:
+        mark_seen(con, rows_to_index)
+    con.close()
     return "ok"
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
