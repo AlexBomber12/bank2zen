@@ -175,10 +175,22 @@ def convert(xlsx):
     con = ensure_db()
     already = seen_lookup(con, keys)
     df["__key__"] = keys
-    new_mask = ~df["__key__"].isin(already)
-    dupes = int((~new_mask).sum())
+    seen_mask = df["__key__"].isin(already)
+    dup_mask = df["__key__"].duplicated(keep="first")
+    new_mask = ~(seen_mask | dup_mask)
+    skipped_seen = int(seen_mask.sum())
+    skipped_dup = int(dup_mask.sum())
     news = int(new_mask.sum())
-    print(f"[bank2zen] Dedup: skipped {dupes}, new {news}")
+    skipped_total = skipped_seen + skipped_dup
+    msg = f"[bank2zen] Dedup: added {news}"
+    if skipped_total:
+        parts = []
+        if skipped_seen:
+            parts.append(f"{skipped_seen} history")
+        if skipped_dup:
+            parts.append(f"{skipped_dup} duplicates")
+        msg += f", skipped {skipped_total} ({', '.join(parts)})"
+    print(msg)
 
     df = df.loc[new_mask].copy()
     if df.empty:
