@@ -1,6 +1,7 @@
 import os
 import sys
 import subprocess
+import datetime as dt
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import pandas as pd, json, pathlib
@@ -31,6 +32,41 @@ CATS = sorted([
 ], key=str.lower)
 
 ACCTS = sorted(["Fineco Credit","Fineco Debit","Наличные Евро","Revolut"], key=str.lower)
+
+# ── date helpers ──────────────────────────────────────────────────────────────
+def _parse_date_value(value):
+    if value is None:
+        return None
+    if isinstance(value, pd.Timestamp):
+        if pd.isna(value):
+            return None
+        return value.normalize()
+    if isinstance(value, dt.datetime):
+        return pd.Timestamp(value).normalize()
+    if isinstance(value, dt.date):
+        return pd.Timestamp(value).normalize()
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "nat"}:
+        return None
+    try:
+        parsed = pd.to_datetime(text, dayfirst=True, errors="coerce")
+    except Exception:
+        return None
+    if pd.isna(parsed):
+        return None
+    return parsed.normalize()
+
+
+def _date_only_display(value) -> str:
+    parsed = _parse_date_value(value)
+    if parsed is not None:
+        return parsed.date().isoformat()
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if text.lower() in {"nan", "nat"}:
+        return ""
+    return text
 
 # ── json utils ────────────────────────────────────────────────────────────────
 def jload(p):
@@ -125,7 +161,7 @@ class Review(tk.Toplevel):
         data=sub if sub is not None else self.df
         for idx,r in data.iterrows():
             self.tree.insert('',tk.END,iid=str(idx),
-                values=(self._fmt_cell(r['Data']),f"{self._amount(r):+.2f}",
+                values=(_date_only_display(r['Data']),f"{self._amount(r):+.2f}",
                     self._fmt_cell(r['Descrizione_Completa']),
                     self._fmt_cell(r['Category']),
                     self._fmt_cell(r['AccountTo'])))
@@ -150,14 +186,32 @@ class Review(tk.Toplevel):
     # sort
     def _sort(self,col):
         rev=self.sort_state.get(col,False)
-        rows=[(self.tree.set(iid,col),iid) for iid in self.tree.get_children('')]
+        rows=[(self.tree.set(iid,col),iid,idx) for idx,iid in enumerate(self.tree.get_children(''))]
         def key(t):
             v=t[0]
             if col=='Amount': return float(v.replace('+','').replace(',','.'))
-            if col=='Date':   return pd.to_datetime(v,dayfirst=True,errors='coerce')
+            if col=='Date':
+                parsed=_parse_date_value(v)
+                return parsed if parsed is not None else pd.Timestamp.max
             return v.lower()
-        rows.sort(key=key,reverse=rev)
-        for i,(_,iid) in enumerate(rows): self.tree.move(iid,'',i)
+        if col=='Date':
+            valid=[]; invalid=[]
+            for val,iid,order in rows:
+                parsed=_parse_date_value(val)
+                if parsed is None:
+                    invalid.append((order,iid))
+                else:
+                    valid.append((parsed,order,iid))
+            valid.sort(key=lambda t:(t[0],t[1]))
+            if rev:
+                valid.reverse()
+            ordered=[iid for _,_,iid in valid]
+            ordered.extend(iid for _,iid in sorted(invalid,key=lambda t:t[0]))
+            for pos,iid in enumerate(ordered):
+                self.tree.move(iid,'',pos)
+        else:
+            rows.sort(key=key,reverse=rev)
+            for i,(_,iid,_) in enumerate(rows): self.tree.move(iid,'',i)
         self.sort_state[col]=not rev
     # save
     def _save_exit(self):
@@ -183,7 +237,11 @@ class AssignWin(tk.Toplevel):
     def __init__(self, master, df):
         super().__init__(master)
         self.title('Assign categories'); self.geometry('980x540')
-        self.df = df.reset_index(drop=True); self.pairs = []
+        self.df = df.reset_index(drop=True)
+        drop_time=[c for c in self.df.columns if str(c).strip().lower()=="time"]
+        if drop_time:
+            self.df = self.df.drop(columns=drop_time)
+        self.pairs = []
         # listbox
         fr = tk.Frame(self); fr.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         sb = tk.Scrollbar(fr); sb.pack(side=tk.RIGHT, fill=tk.Y)
@@ -218,9 +276,10 @@ class AssignWin(tk.Toplevel):
                 amt = -exp
 
             amount_str = f"{amt:+.2f}"
+            date_str = _date_only_display(r.get('Data'))
             self.lb.insert(
                 tk.END,
-                f"{r['Data']} | {amount_str} | {r['Descrizione_Completa']}"
+                f"{date_str} | {amount_str} | {r['Descrizione_Completa']}"
             )
         self.lb.bind("<<ListboxSelect>>", self._on_list_select)
         self.lb.bind("<Double-Button-1>", self._assign_selected)
